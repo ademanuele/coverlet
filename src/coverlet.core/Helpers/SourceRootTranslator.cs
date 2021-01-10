@@ -13,7 +13,7 @@ namespace Coverlet.Core.Helpers
         public string OriginalPath { get; set; }
     }
 
-    internal class SourceRootTranslator : ISourceRootTranslator
+    public class SourceRootTranslator : ISourceRootTranslator
     {
         private readonly ILogger _logger;
         private readonly IFileSystem _fileSystem;
