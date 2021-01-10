@@ -2,7 +2,7 @@
   <Import Project="$(RepoRoot)src\coverlet.msbuild.tasks\coverlet.msbuild.props" />
 
   <PropertyGroup>
-    <TargetFramework>netcoreapp3.1</TargetFramework>
+    <TargetFramework>net5.0</TargetFramework>
     <IsPackable>false</IsPackable>
     <NoWarn>$(NoWarn);CS8002</NoWarn>
     <!--For test TestInstrument_NetstandardAwareAssemblyResolver_PreserveCompilationContext-->
@@ -16,24 +16,23 @@
     <PackageReference Include="ReportGenerator.Core" />
     <PackageReference Include="xunit" />
     <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="Tmds.ExecFunction" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="$(RepoRoot)src\coverlet.core\coverlet.core.csproj" />
     <ProjectReference Include="$(RepoRoot)src\coverlet.msbuild.tasks\coverlet.msbuild.tasks.csproj" />
-    <ProjectReference Include="$(RepoRoot)test\coverlet.tests.remoteexecutor\coverlet.tests.remoteexecutor.csproj" />
     <ProjectReference Include="$(RepoRoot)test\coverlet.tests.projectsample.empty\coverlet.tests.projectsample.empty.csproj" />
     <ProjectReference Include="$(RepoRoot)test\coverlet.tests.projectsample.excludedbyattribute\coverlet.tests.projectsample.excludedbyattribute.csproj" />
     <ProjectReference Include="$(RepoRoot)test\coverlet.core.tests.samples.netstandard\coverlet.core.tests.samples.netstandard.csproj" />
+    <ProjectReference Include="$(RepoRoot)test\coverlet.tests.xunit.extensions\coverlet.tests.xunit.extensions.csproj" />
   </ItemGroup>
 
-  <!--For test TestInstrument_NetstandardAwareAssemblyResolver_PreserveCompilationContext-->
   <ItemGroup>
+    <!--For test TestInstrument_NetstandardAwareAssemblyResolver_PreserveCompilationContext-->
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="2.2.0" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <Folder Include="TestAssets\" />
+    <!--For test issue 809 https://github.com/coverlet-coverage/coverlet/issues/809-->
+    <PackageReference Include="LinqKit.Microsoft.EntityFrameworkCore" Version="2.0.0" />
   </ItemGroup>
 
   <ItemGroup>
@@ -42,6 +41,9 @@
     </None>
     <None Update="TestAssets\75d9f96508d74def860a568f426ea4a4.pdb">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="TestAssets\CoverletSourceRootsMappingTest">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>
     <None Update="TestAssets\System.Private.CoreLib.dll">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
@@ -52,10 +54,8 @@
   </ItemGroup>
 
   <Target Name="PostBuild" AfterTargets="PostBuildEvent">
-    <Exec Condition="$([MSBuild]::IsOSPlatform('Windows'))" Command="copy $(ProjectDir)..\coverlet.tests.remoteexecutor\$(OutDir) $(TargetDir) /Y" />
-    <Exec Condition="$([MSBuild]::IsOSPlatform('OSX')) OR $([MSBuild]::IsOSPlatform('Linux'))" Command="cp -r $(ProjectDir)..\coverlet.tests.remoteexecutor\$(OutDir). $(TargetDir)" />
-    <Exec Condition="$([MSBuild]::IsOSPlatform('Windows'))" Command="copy $(ProjectDir)..\coverlet.tests.projectsample.excludedbyattribute\$(OutDir) $(TargetDir)TestAssets /Y" />
-    <Exec Condition="$([MSBuild]::IsOSPlatform('OSX')) OR $([MSBuild]::IsOSPlatform('Linux'))" Command="cp -r $(ProjectDir)..\coverlet.tests.projectsample.excludedbyattribute\$(OutDir). $(TargetDir)TestAssets" />
+    <Exec Condition="$([MSBuild]::IsOSPlatform('Windows'))" Command="copy $(RepoRoot)test\coverlet.tests.projectsample.excludedbyattribute\$(OutDir) $(TargetDir)TestAssets /Y" />
+    <Exec Condition="$([MSBuild]::IsOSPlatform('OSX')) OR $([MSBuild]::IsOSPlatform('Linux'))" Command="cp -r $(RepoRoot)test/coverlet.tests.projectsample.excludedbyattribute/$(OutDir). $(TargetDir)TestAssets" />
   </Target>
 
   <Import Project="$(RepoRoot)src\coverlet.msbuild.tasks\coverlet.msbuild.targets" />

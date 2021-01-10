@@ -1,9 +1,10 @@
-﻿using Coverlet.Core.Instrumentation;
-using Coverlet.Tests.RemoteExecutor;
-using System;
+﻿using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+
+using Coverlet.Core.Instrumentation;
 using Xunit;
 
 namespace Coverlet.Core.Tests.Instrumentation
@@ -13,6 +14,7 @@ namespace Coverlet.Core.Tests.Instrumentation
         public TrackerContext()
         {
             ModuleTrackerTemplate.HitsFilePath = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+            ModuleTrackerTemplate.FlushHitFile = true;
         }
 
         public void Dispose()
@@ -23,14 +25,14 @@ namespace Coverlet.Core.Tests.Instrumentation
         }
     }
 
-    public class ModuleTrackerTemplateTests
+    public class ModuleTrackerTemplateTests : ExternalProcessExecutionTest
     {
         private static readonly Task<int> _success = Task.FromResult(0);
 
         [Fact]
         public void HitsFileCorrectlyWritten()
         {
-            using var invoker = RemoteExecutor.Invoke(_ =>
+            FunctionExecutor.Run(() =>
             {
                 using var ctx = new TrackerContext();
                 ModuleTrackerTemplate.HitsArray = new[] { 1, 2, 0, 3 };
@@ -46,7 +48,7 @@ namespace Coverlet.Core.Tests.Instrumentation
         [Fact]
         public void HitsFileWithDifferentNumberOfEntriesCausesExceptionOnUnload()
         {
-            using var invoker = RemoteExecutor.Invoke(_ =>
+            FunctionExecutor.Run(() =>
             {
                 using var ctx = new TrackerContext();
                 WriteHitsFile(new[] { 1, 2, 3 });
@@ -59,14 +61,21 @@ namespace Coverlet.Core.Tests.Instrumentation
         [Fact]
         public void HitsOnMultipleThreadsCorrectlyCounted()
         {
-            using var invoker = RemoteExecutor.Invoke(_ =>
+            FunctionExecutor.Run(() =>
             {
+                List<Thread> threads = new List<Thread>();
                 using var ctx = new TrackerContext();
                 ModuleTrackerTemplate.HitsArray = new[] { 0, 0, 0, 0 };
                 for (int i = 0; i < ModuleTrackerTemplate.HitsArray.Length; ++i)
                 {
                     var t = new Thread(HitIndex);
+                    threads.Add(t);
                     t.Start(i);
+                }
+
+                foreach (Thread t in threads)
+                {
+                    t.Join();
                 }
 
                 ModuleTrackerTemplate.UnloadModule(null, null);
@@ -89,7 +98,7 @@ namespace Coverlet.Core.Tests.Instrumentation
         [Fact]
         public void MultipleSequentialUnloadsHaveCorrectTotalData()
         {
-            using var invoker = RemoteExecutor.Invoke(_ =>
+            FunctionExecutor.Run(() =>
             {
                 using var ctx = new TrackerContext();
                 ModuleTrackerTemplate.HitsArray = new[] { 0, 3, 2, 1 };
@@ -108,7 +117,7 @@ namespace Coverlet.Core.Tests.Instrumentation
         [Fact]
         public void MutexBlocksMultipleWriters()
         {
-            using var invoker = RemoteExecutor.Invoke(async _ =>
+            FunctionExecutor.Run(async () =>
             {
                 using var ctx = new TrackerContext();
                 using (var mutex = new Mutex(

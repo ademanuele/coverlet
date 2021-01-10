@@ -9,28 +9,36 @@ using System.Reflection.Metadata;
 using System.Reflection.PortableExecutable;
 using System.Text.RegularExpressions;
 
-using Coverlet.Core.Abstracts;
+using Coverlet.Core.Abstractions;
 
 namespace Coverlet.Core.Helpers
 {
     public class InstrumentationHelper : IInstrumentationHelper
     {
+        private const int RetryAttempts = 12;
         private readonly ConcurrentDictionary<string, string> _backupList = new ConcurrentDictionary<string, string>();
         private readonly IRetryHelper _retryHelper;
         private readonly IFileSystem _fileSystem;
+        private readonly ISourceRootTranslator _sourceRootTranslator;
+        private ILogger _logger;
 
-        public InstrumentationHelper(IProcessExitHandler processExitHandler, IRetryHelper retryHelper, IFileSystem fileSystem)
+        public InstrumentationHelper(IProcessExitHandler processExitHandler, IRetryHelper retryHelper, IFileSystem fileSystem, ILogger logger, ISourceRootTranslator sourceRootTranslator)
         {
             processExitHandler.Add((s, e) => RestoreOriginalModules());
             _retryHelper = retryHelper;
             _fileSystem = fileSystem;
+            _logger = logger;
+            _sourceRootTranslator = sourceRootTranslator;
         }
 
-        public string[] GetCoverableModules(string module, string[] directories, bool includeTestAssembly)
+        public string[] GetCoverableModules(string moduleOrAppDirectory, string[] directories, bool includeTestAssembly)
         {
             Debug.Assert(directories != null);
+            Debug.Assert(moduleOrAppDirectory != null);
 
-            string moduleDirectory = Path.GetDirectoryName(module);
+            bool isAppDirectory = !File.Exists(moduleOrAppDirectory) && Directory.Exists(moduleOrAppDirectory);
+            string moduleDirectory = isAppDirectory ? moduleOrAppDirectory : Path.GetDirectoryName(moduleOrAppDirectory);
+
             if (moduleDirectory == string.Empty)
             {
                 moduleDirectory = Directory.GetCurrentDirectory();
@@ -62,8 +70,8 @@ namespace Coverlet.Core.Helpers
             // The module's name must be unique.
             var uniqueModules = new HashSet<string>();
 
-            if (!includeTestAssembly)
-                uniqueModules.Add(Path.GetFileName(module));
+            if (!includeTestAssembly && !isAppDirectory)
+                uniqueModules.Add(Path.GetFileName(moduleOrAppDirectory));
 
             return dirs.SelectMany(d => Directory.EnumerateFiles(d))
                 .Where(m => IsAssembly(m) && uniqueModules.Add(Path.GetFileName(m)))
@@ -81,14 +89,14 @@ namespace Coverlet.Core.Helpers
                     if (entry.Type == DebugDirectoryEntryType.CodeView)
                     {
                         var codeViewData = peReader.ReadCodeViewDebugDirectoryData(entry);
-                        if (codeViewData.Path == $"{Path.GetFileNameWithoutExtension(module)}.pdb")
+                        if (_sourceRootTranslator.ResolveFilePath(codeViewData.Path) == $"{Path.GetFileNameWithoutExtension(module)}.pdb")
                         {
                             // PDB is embedded
                             embedded = true;
                             return true;
                         }
 
-                        return _fileSystem.Exists(codeViewData.Path);
+                        return _fileSystem.Exists(_sourceRootTranslator.ResolveFilePath(codeViewData.Path));
                     }
                 }
 
@@ -112,7 +120,7 @@ namespace Coverlet.Core.Helpers
                             foreach (DocumentHandle docHandle in metadataReader.Documents)
                             {
                                 Document document = metadataReader.GetDocument(docHandle);
-                                string docName = metadataReader.GetString(document.Name);
+                                string docName = _sourceRootTranslator.ResolveFilePath(metadataReader.GetString(document.Name));
 
                                 // We verify all docs and return false if not all are present in local
                                 // We could have false negative if doc is not a source
@@ -144,7 +152,7 @@ namespace Coverlet.Core.Helpers
                     if (entry.Type == DebugDirectoryEntryType.CodeView)
                     {
                         var codeViewData = peReader.ReadCodeViewDebugDirectoryData(entry);
-                        using Stream pdbStream = _fileSystem.OpenRead(codeViewData.Path);
+                        using Stream pdbStream = _fileSystem.OpenRead(_sourceRootTranslator.ResolveFilePath(codeViewData.Path));
                         using MetadataReaderProvider metadataReaderProvider = MetadataReaderProvider.FromPortablePdbStream(pdbStream);
                         MetadataReader metadataReader = null;
                         try
@@ -153,14 +161,13 @@ namespace Coverlet.Core.Helpers
                         }
                         catch (BadImageFormatException)
                         {
-                            // TODO log this to warning
-                            // In case of non portable pdb we get exception so we skip file sources check
+                            _logger.LogWarning($"{nameof(BadImageFormatException)} during MetadataReaderProvider.FromPortablePdbStream in InstrumentationHelper.PortablePdbHasLocalSource, unable to check if module has got local source.");
                             return true;
                         }
                         foreach (DocumentHandle docHandle in metadataReader.Documents)
                         {
                             Document document = metadataReader.GetDocument(docHandle);
-                            string docName = metadataReader.GetString(document.Name);
+                            string docName = _sourceRootTranslator.ResolveFilePath(metadataReader.GetString(document.Name));
 
                             // We verify all docs and return false if not all are present in local
                             // We could have false negative if doc is not a source
@@ -213,7 +220,7 @@ namespace Coverlet.Core.Helpers
                 _fileSystem.Copy(backupPath, module, true);
                 _fileSystem.Delete(backupPath);
                 _backupList.TryRemove(module, out string _);
-            }, retryStrategy, 10);
+            }, retryStrategy, RetryAttempts);
 
             _retryHelper.Retry(() =>
             {
@@ -224,7 +231,7 @@ namespace Coverlet.Core.Helpers
                     _fileSystem.Delete(backupSymbolPath);
                     _backupList.TryRemove(symbolFile, out string _);
                 }
-            }, retryStrategy, 10);
+            }, retryStrategy, RetryAttempts);
         }
 
         public virtual void RestoreOriginalModules()
@@ -241,16 +248,14 @@ namespace Coverlet.Core.Helpers
                     _fileSystem.Copy(backupPath, key, true);
                     _fileSystem.Delete(backupPath);
                     _backupList.TryRemove(key, out string _);
-                }, retryStrategy, 10);
+                }, retryStrategy, RetryAttempts);
             }
         }
 
         public void DeleteHitsFile(string path)
         {
-            // Retry hitting the hits file - retry up to 10 times, since the file could be locked
-            // See: https://github.com/tonerdo/coverlet/issues/25
             var retryStrategy = CreateRetryStrategy();
-            _retryHelper.Retry(() => _fileSystem.Delete(path), retryStrategy, 10);
+            _retryHelper.Retry(() => _fileSystem.Delete(path), retryStrategy, RetryAttempts);
         }
 
         public bool IsValidFilterExpression(string filter)
@@ -366,6 +371,11 @@ namespace Coverlet.Core.Helpers
 
         public bool IsLocalMethod(string method)
             => new Regex(WildcardToRegex("<*>*__*|*")).IsMatch(method);
+
+        public void SetLogger(ILogger logger)
+        {
+            _logger = logger;
+        }
 
         private bool IsTypeFilterMatch(string module, string type, string[] filters)
         {

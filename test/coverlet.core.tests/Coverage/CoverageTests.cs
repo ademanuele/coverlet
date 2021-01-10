@@ -1,8 +1,9 @@
 using System;
 using System.IO;
 
-using Coverlet.Core.Abstracts;
+using Coverlet.Core.Abstractions;
 using Coverlet.Core.Helpers;
+using Coverlet.Core.Symbols;
 using Moq;
 using Xunit;
 
@@ -10,7 +11,6 @@ namespace Coverlet.Core.Tests
 {
     public partial class CoverageTests
     {
-        private readonly InstrumentationHelper _instrumentationHelper = new InstrumentationHelper(new ProcessExitHandler(), new RetryHelper(), new FileSystem());
         private readonly Mock<ILogger> _mockLogger = new Mock<ILogger>();
 
         [Fact]
@@ -25,8 +25,24 @@ namespace Coverlet.Core.Tests
             File.Copy(pdb, Path.Combine(directory.FullName, Path.GetFileName(pdb)), true);
 
             // TODO: Find a way to mimick hits
+            InstrumentationHelper instrumentationHelper =
+                new InstrumentationHelper(new ProcessExitHandler(), new RetryHelper(), new FileSystem(), new Mock<ILogger>().Object,
+                                          new SourceRootTranslator(module, new Mock<ILogger>().Object, new FileSystem()));
 
-            var coverage = new Coverage(Path.Combine(directory.FullName, Path.GetFileName(module)), Array.Empty<string>(), Array.Empty<string>(), Array.Empty<string>(), Array.Empty<string>(), Array.Empty<string>(), false, false, string.Empty, false, _mockLogger.Object, _instrumentationHelper, new FileSystem());
+            CoverageParameters parameters = new CoverageParameters
+            {
+                IncludeFilters = new string[] { "[coverlet.tests.projectsample.excludedbyattribute*]*" },
+                IncludeDirectories = Array.Empty<string>(),
+                ExcludeFilters = Array.Empty<string>(),
+                ExcludedSourceFiles = Array.Empty<string>(),
+                ExcludeAttributes = Array.Empty<string>(),
+                IncludeTestAssembly = false,
+                SingleHit = false,
+                MergeWith = string.Empty,
+                UseSourceLink = false
+            };
+
+            var coverage = new Coverage(Path.Combine(directory.FullName, Path.GetFileName(module)), parameters, _mockLogger.Object, instrumentationHelper, new FileSystem(), new SourceRootTranslator(_mockLogger.Object, new FileSystem()), new CecilSymbolHelper());
             coverage.PrepareModules();
 
             var result = coverage.GetCoverageResult();
@@ -47,7 +63,25 @@ namespace Coverlet.Core.Tests
             File.Copy(module, Path.Combine(directory.FullName, Path.GetFileName(module)), true);
             File.Copy(pdb, Path.Combine(directory.FullName, Path.GetFileName(pdb)), true);
 
-            var coverage = new Coverage(Path.Combine(directory.FullName, Path.GetFileName(module)), Array.Empty<string>(), Array.Empty<string>(), Array.Empty<string>(), Array.Empty<string>(), Array.Empty<string>(), true, false, string.Empty, false, _mockLogger.Object, _instrumentationHelper, new FileSystem());
+            InstrumentationHelper instrumentationHelper =
+                new InstrumentationHelper(new ProcessExitHandler(), new RetryHelper(), new FileSystem(), new Mock<ILogger>().Object,
+                                          new SourceRootTranslator(module, new Mock<ILogger>().Object, new FileSystem()));
+
+            CoverageParameters parameters = new CoverageParameters
+            {
+                IncludeFilters = Array.Empty<string>(),
+                IncludeDirectories = Array.Empty<string>(),
+                ExcludeFilters = Array.Empty<string>(),
+                ExcludedSourceFiles = Array.Empty<string>(),
+                ExcludeAttributes = Array.Empty<string>(),
+                IncludeTestAssembly = true,
+                SingleHit = false,
+                MergeWith = string.Empty,
+                UseSourceLink = false
+            };
+
+            var coverage = new Coverage(Path.Combine(directory.FullName, Path.GetFileName(module)), parameters, _mockLogger.Object, instrumentationHelper, new FileSystem(),
+                                        new SourceRootTranslator(module, _mockLogger.Object, new FileSystem()), new CecilSymbolHelper());
             coverage.PrepareModules();
 
             var result = coverage.GetCoverageResult();

@@ -43,23 +43,24 @@ namespace Coverlet.Collector.Tests
         }
 
         [Theory]
-        [InlineData("[*]*,[coverlet]*", "[coverlet.*.tests?]*,[coverlet.*.tests.*]*", @"E:\temp,/var/tmp", "module1.cs,module2.cs", "Obsolete,GeneratedCodeAttribute,CompilerGeneratedAttribute")]
-        [InlineData("[*]*,,[coverlet]*", "[coverlet.*.tests?]*,,[coverlet.*.tests.*]*", @"E:\temp,,/var/tmp", "module1.cs,,module2.cs", "Obsolete,,GeneratedCodeAttribute,,CompilerGeneratedAttribute")]
-        [InlineData("[*]*, ,[coverlet]*", "[coverlet.*.tests?]*, ,[coverlet.*.tests.*]*", @"E:\temp, ,/var/tmp", "module1.cs, ,module2.cs", "Obsolete, ,GeneratedCodeAttribute, ,CompilerGeneratedAttribute")]
-        [InlineData("[*]*,\t,[coverlet]*", "[coverlet.*.tests?]*,\t,[coverlet.*.tests.*]*", "E:\\temp,\t,/var/tmp", "module1.cs,\t,module2.cs", "Obsolete,\t,GeneratedCodeAttribute,\t,CompilerGeneratedAttribute")]
-        [InlineData("[*]*, [coverlet]*", "[coverlet.*.tests?]*, [coverlet.*.tests.*]*", @"E:\temp, /var/tmp", "module1.cs, module2.cs", "Obsolete, GeneratedCodeAttribute, CompilerGeneratedAttribute")]
-        [InlineData("[*]*,\t[coverlet]*", "[coverlet.*.tests?]*,\t[coverlet.*.tests.*]*", "E:\\temp,\t/var/tmp", "module1.cs,\tmodule2.cs", "Obsolete,\tGeneratedCodeAttribute,\tCompilerGeneratedAttribute")]
-        [InlineData("[*]*, \t[coverlet]*", "[coverlet.*.tests?]*, \t[coverlet.*.tests.*]*", "E:\\temp, \t/var/tmp", "module1.cs, \tmodule2.cs", "Obsolete, \tGeneratedCodeAttribute, \tCompilerGeneratedAttribute")]
-        [InlineData("[*]*,\r\n[coverlet]*", "[coverlet.*.tests?]*,\r\n[coverlet.*.tests.*]*", "E:\\temp,\r\n/var/tmp", "module1.cs,\r\nmodule2.cs", "Obsolete,\r\nGeneratedCodeAttribute,\r\nCompilerGeneratedAttribute")]
-        [InlineData("[*]*, \r\n [coverlet]*", "[coverlet.*.tests?]*, \r\n [coverlet.*.tests.*]*", "E:\\temp, \r\n /var/tmp", "module1.cs, \r\n module2.cs", "Obsolete, \r\n GeneratedCodeAttribute, \r\n CompilerGeneratedAttribute")]
-        [InlineData("[*]*,\t\r\n\t[coverlet]*", "[coverlet.*.tests?]*,\t\r\n\t[coverlet.*.tests.*]*", "E:\\temp,\t\r\n\t/var/tmp", "module1.cs,\t\r\n\tmodule2.cs", "Obsolete,\t\r\n\tGeneratedCodeAttribute,\t\r\n\tCompilerGeneratedAttribute")]
-        [InlineData("[*]*, \t \r\n \t [coverlet]*", "[coverlet.*.tests?]*, \t \r\n \t [coverlet.*.tests.*]*", "E:\\temp, \t \r\n \t /var/tmp", "module1.cs, \t \r\n \t module2.cs", "Obsolete, \t \r\n \t GeneratedCodeAttribute, \t \r\n \t CompilerGeneratedAttribute")]
-        [InlineData(" [*]* , [coverlet]* ", " [coverlet.*.tests?]* , [coverlet.*.tests.*]* ", " E:\\temp , /var/tmp ", " module1.cs , module2.cs ", " Obsolete , GeneratedCodeAttribute , CompilerGeneratedAttribute ")]
+        [InlineData("[*]*,[coverlet]*", "[coverlet.*.tests?]*,[coverlet.*.tests.*]*", @"E:\temp,/var/tmp", "module1.cs,module2.cs", "Obsolete,GeneratedCodeAttribute,CompilerGeneratedAttribute", "DoesNotReturnAttribute,ThrowsAttribute")]
+        [InlineData("[*]*,,[coverlet]*", "[coverlet.*.tests?]*,,[coverlet.*.tests.*]*", @"E:\temp,,/var/tmp", "module1.cs,,module2.cs", "Obsolete,,GeneratedCodeAttribute,,CompilerGeneratedAttribute", "DoesNotReturnAttribute,,ThrowsAttribute")]
+        [InlineData("[*]*, ,[coverlet]*", "[coverlet.*.tests?]*, ,[coverlet.*.tests.*]*", @"E:\temp, ,/var/tmp", "module1.cs, ,module2.cs", "Obsolete, ,GeneratedCodeAttribute, ,CompilerGeneratedAttribute", "DoesNotReturnAttribute, ,ThrowsAttribute")]
+        [InlineData("[*]*,\t,[coverlet]*", "[coverlet.*.tests?]*,\t,[coverlet.*.tests.*]*", "E:\\temp,\t,/var/tmp", "module1.cs,\t,module2.cs", "Obsolete,\t,GeneratedCodeAttribute,\t,CompilerGeneratedAttribute", "DoesNotReturnAttribute,\t,ThrowsAttribute")]
+        [InlineData("[*]*, [coverlet]*", "[coverlet.*.tests?]*, [coverlet.*.tests.*]*", @"E:\temp, /var/tmp", "module1.cs, module2.cs", "Obsolete, GeneratedCodeAttribute, CompilerGeneratedAttribute", "DoesNotReturnAttribute, ThrowsAttribute")]
+        [InlineData("[*]*,\t[coverlet]*", "[coverlet.*.tests?]*,\t[coverlet.*.tests.*]*", "E:\\temp,\t/var/tmp", "module1.cs,\tmodule2.cs", "Obsolete,\tGeneratedCodeAttribute,\tCompilerGeneratedAttribute", "DoesNotReturnAttribute,\tThrowsAttribute")]
+        [InlineData("[*]*, \t[coverlet]*", "[coverlet.*.tests?]*, \t[coverlet.*.tests.*]*", "E:\\temp, \t/var/tmp", "module1.cs, \tmodule2.cs", "Obsolete, \tGeneratedCodeAttribute, \tCompilerGeneratedAttribute", "DoesNotReturnAttribute, \tThrowsAttribute")]
+        [InlineData("[*]*,\r\n[coverlet]*", "[coverlet.*.tests?]*,\r\n[coverlet.*.tests.*]*", "E:\\temp,\r\n/var/tmp", "module1.cs,\r\nmodule2.cs", "Obsolete,\r\nGeneratedCodeAttribute,\r\nCompilerGeneratedAttribute", "DoesNotReturnAttribute,\r\nThrowsAttribute")]
+        [InlineData("[*]*, \r\n [coverlet]*", "[coverlet.*.tests?]*, \r\n [coverlet.*.tests.*]*", "E:\\temp, \r\n /var/tmp", "module1.cs, \r\n module2.cs", "Obsolete, \r\n GeneratedCodeAttribute, \r\n CompilerGeneratedAttribute", "DoesNotReturnAttribute, \r\n ThrowsAttribute")]
+        [InlineData("[*]*,\t\r\n\t[coverlet]*", "[coverlet.*.tests?]*,\t\r\n\t[coverlet.*.tests.*]*", "E:\\temp,\t\r\n\t/var/tmp", "module1.cs,\t\r\n\tmodule2.cs", "Obsolete,\t\r\n\tGeneratedCodeAttribute,\t\r\n\tCompilerGeneratedAttribute", "DoesNotReturnAttribute,\t\r\n\tThrowsAttribute")]
+        [InlineData("[*]*, \t \r\n \t [coverlet]*", "[coverlet.*.tests?]*, \t \r\n \t [coverlet.*.tests.*]*", "E:\\temp, \t \r\n \t /var/tmp", "module1.cs, \t \r\n \t module2.cs", "Obsolete, \t \r\n \t GeneratedCodeAttribute, \t \r\n \t CompilerGeneratedAttribute", "DoesNotReturnAttribute, \t \r\n \t ThrowsAttribute")]
+        [InlineData(" [*]* , [coverlet]* ", " [coverlet.*.tests?]* , [coverlet.*.tests.*]* ", " E:\\temp , /var/tmp ", " module1.cs , module2.cs ", " Obsolete , GeneratedCodeAttribute , CompilerGeneratedAttribute ", "DoesNotReturnAttribute , ThrowsAttribute")]
         public void ParseShouldCorrectlyParseConfigurationElement(string includeFilters,
             string excludeFilters,
             string includeDirectories,
             string excludeSourceFiles,
-            string excludeAttributes)
+            string excludeAttributes,
+            string doesNotReturnAttributes)
         {
             var testModules = new List<string> { "abc.dll" };
             var doc = new XmlDocument();
@@ -73,6 +74,8 @@ namespace Coverlet.Collector.Tests
             this.CreateCoverletNodes(doc, configElement, CoverletConstants.UseSourceLinkElementName, "false");
             this.CreateCoverletNodes(doc, configElement, CoverletConstants.SingleHitElementName, "true");
             this.CreateCoverletNodes(doc, configElement, CoverletConstants.IncludeTestAssemblyElementName, "true");
+            this.CreateCoverletNodes(doc, configElement, CoverletConstants.SkipAutoProps, "true");
+            this.CreateCoverletNodes(doc, configElement, CoverletConstants.DoesNotReturnAttributesElementName, doesNotReturnAttributes);
 
             CoverletSettings coverletSettings = _coverletSettingsParser.Parse(configElement, testModules);
 
@@ -90,10 +93,13 @@ namespace Coverlet.Collector.Tests
             Assert.Equal("[coverlet.*]*", coverletSettings.ExcludeFilters[0]);
             Assert.Equal("[coverlet.*.tests?]*", coverletSettings.ExcludeFilters[1]);
             Assert.Equal("[coverlet.*.tests.*]*", coverletSettings.ExcludeFilters[2]);
-            
+            Assert.Equal("DoesNotReturnAttribute", coverletSettings.DoesNotReturnAttributes[0]);
+            Assert.Equal("ThrowsAttribute", coverletSettings.DoesNotReturnAttributes[1]);
+
             Assert.False(coverletSettings.UseSourceLink);
             Assert.True(coverletSettings.SingleHit);
             Assert.True(coverletSettings.IncludeTestAssembly);
+            Assert.True(coverletSettings.SkipAutoProps);
         }
 
         [Fact]
@@ -102,11 +108,11 @@ namespace Coverlet.Collector.Tests
             var testModules = new List<string> { "abc.dll" };
             var doc = new XmlDocument();
             var configElement = doc.CreateElement("Configuration");
-            this.CreateCoverleteNullInnerTextNodes(doc, configElement, CoverletConstants.IncludeFiltersElementName);
-            this.CreateCoverleteNullInnerTextNodes(doc, configElement, CoverletConstants.ExcludeFiltersElementName);
-            this.CreateCoverleteNullInnerTextNodes(doc, configElement, CoverletConstants.IncludeDirectoriesElementName);    
-            this.CreateCoverleteNullInnerTextNodes(doc, configElement, CoverletConstants.ExcludeSourceFilesElementName);
-            this.CreateCoverleteNullInnerTextNodes(doc, configElement, CoverletConstants.ExcludeAttributesElementName);
+            this.CreateCoverletNullInnerTextNodes(doc, configElement, CoverletConstants.IncludeFiltersElementName);
+            this.CreateCoverletNullInnerTextNodes(doc, configElement, CoverletConstants.ExcludeFiltersElementName);
+            this.CreateCoverletNullInnerTextNodes(doc, configElement, CoverletConstants.IncludeDirectoriesElementName);
+            this.CreateCoverletNullInnerTextNodes(doc, configElement, CoverletConstants.ExcludeSourceFilesElementName);
+            this.CreateCoverletNullInnerTextNodes(doc, configElement, CoverletConstants.ExcludeAttributesElementName);
 
             CoverletSettings coverletSettings = _coverletSettingsParser.Parse(configElement, testModules);
 
@@ -184,7 +190,7 @@ namespace Coverlet.Collector.Tests
             configElement.AppendChild(node);
         }
 
-        private void CreateCoverleteNullInnerTextNodes(XmlDocument doc, XmlElement configElement, string nodeSetting)
+        private void CreateCoverletNullInnerTextNodes(XmlDocument doc, XmlElement configElement, string nodeSetting)
         {
             var node = doc.CreateNode("element", nodeSetting, string.Empty);
             node.InnerText = null;

@@ -4,7 +4,54 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## Release date 2021-01-09
+### Packages  
+coverlet.msbuild 3.0.0  
+coverlet.console 3.0.0  
+coverlet.collector 3.0.0  
+
+### Fixed
+-Attribute exclusion does not work if attribute name does not end with "Attribute" [#884](https://github.com/coverlet-coverage/coverlet/pull/884) by https://github.com/bddckr  
+-Fix deterministic build+source link bug [#895](https://github.com/coverlet-coverage/coverlet/pull/895)  
+-Fix anonymous delegate compiler generate bug [#896](https://github.com/coverlet-coverage/coverlet/pull/896)  
+-Fix incorrect branch coverage with await ValueTask [#949](https://github.com/coverlet-coverage/coverlet/pull/949) by https://github.com/alexthornton1  
+-Fix switch pattern coverage [#1006](https://github.com/coverlet-coverage/coverlet/pull/1006)
+
+### Added
+-Skip autoprops feature [#912](https://github.com/coverlet-coverage/coverlet/pull/912)  
+-Exclude code that follows [DoesNotReturn] from code coverage [#904](https://github.com/coverlet-coverage/coverlet/pull/904) by https://github.com/kevin-montrose  
+-`CoverletReport` MSBuild variable containing coverage filenames [#932](https://github.com/coverlet-coverage/coverlet/pull/932) by https://github.com/0xced  
+-Add Visual Studio Add-In [#954](https://github.com/coverlet-coverage/coverlet/pull/954) by https://github.com/FortuneN  
+-Remove workaround for deterministic build for sdk >= 3.1.100 [#965](https://github.com/coverlet-coverage/coverlet/pull/965)  
+-Allow standalone coverlet usage for integration/end-to-end tests using .NET tool driver [#991](https://github.com/coverlet-coverage/coverlet/pull/991)  
+-Support .NET Framework(>= net461) for in-process data collectors [#970](https://github.com/coverlet-coverage/coverlet/pull/970)
+
+## Release date 2020-05-30
+### Packages  
+coverlet.msbuild 2.9.0  
+coverlet.console 1.7.2  
+coverlet.collector 1.3.0  
+
+### Fixed
+
+-Fix for code complexity not being generated for methods for cobertura reporter [#738](https://github.com/tonerdo/coverlet/pull/798) by https://github.com/dannyBies  
+-Fix coverage, skip branches in generated `MoveNext()` for singleton iterators [#813](https://github.com/coverlet-coverage/coverlet/pull/813) by https://github.com/bert2  
+-Fix 'The process cannot access the file...because it is being used by another process' due to double flush for collectors driver [#https://github.com/coverlet-coverage/coverlet/pull/835](https://github.com/coverlet-coverage/coverlet/pull/835)  
+-Fix skip [ExcludefromCoverage] for generated async state machine [#849](https://github.com/coverlet-coverage/coverlet/pull/849)
+
+### Added
+
+-Added support for deterministic build for msbuild/collectors driver [#802](https://github.com/tonerdo/coverlet/pull/802)  [#796](https://github.com/tonerdo/coverlet/pull/796) with the help of https://github.com/clairernovotny and https://github.com/tmat
+
+### Improvements
+
+-Refactore DependencyInjection [#728](https://github.com/coverlet-coverage/coverlet/pull/768) by https://github.com/daveMueller
+
+## Release date 2020-04-02
+### Packages  
+coverlet.msbuild 2.8.1  
+coverlet.console 1.7.1  
+coverlet.collector 1.2.1  
 
 ### Fixed
 
@@ -12,10 +59,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 -Fix bug with nested types filtering [#689](https://github.com/tonerdo/coverlet/issues/689)  
 -Fix Coverage Issue - New Using + Async/Await + ConfigureAwait [#669](https://github.com/tonerdo/coverlet/issues/669)  
 -Improve branch detection for lambda functions and async/await statements [#702](https://github.com/tonerdo/coverlet/pull/702) by https://github.com/matteoerigozzi  
+-Improve coverage, hide compiler generated branches for try/catch blocks inside async state machine [#716](https://github.com/tonerdo/coverlet/pull/716) by https://github.com/matteoerigozzi  
+-Improve coverage, skip lambda cached field [#753](https://github.com/tonerdo/coverlet/pull/753)
 
 ### Improvements
 
--Trim whitespace between values when reading from configuration from runsettings [#679](https://github.com/tonerdo/coverlet/pull/679) by https://github.com/EricStG
+-Trim whitespace between values when reading from configuration from runsettings [#679](https://github.com/tonerdo/coverlet/pull/679) by https://github.com/EricStG  
+-Code improvement, flow ILogger to InstrumentationHelper [#727](https://github.com/tonerdo/coverlet/pull/727) by https://github.com/daveMueller  
+-Add support for line branch coverage in OpenCover format [#772](https://github.com/tonerdo/coverlet/pull/772) by https://github.com/costin-zaharia  
 
 ## Release date 2020-01-03
 ### Packages  
@@ -67,4 +118,3 @@ coverlet.collector 1.1.0
 -Fix property attribute detection [#477](https://github.com/tonerdo/coverlet/pull/477) by https://github.com/amweiss  
 -Fix instrumentation serialization bug [#458](https://github.com/tonerdo/coverlet/pull/458)  
 -Fix culture for cobertura xml report [#464](https://github.com/tonerdo/coverlet/pull/464)
-

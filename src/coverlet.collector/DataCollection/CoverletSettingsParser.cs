@@ -29,23 +29,25 @@ namespace Coverlet.Collector.DataCollection
         {
             var coverletSettings = new CoverletSettings
             {
-                TestModule = this.ParseTestModule(testModules)
+                TestModule = ParseTestModule(testModules)
             };
 
             if (configurationElement != null)
             {
-                coverletSettings.IncludeFilters = this.ParseIncludeFilters(configurationElement);
-                coverletSettings.IncludeDirectories = this.ParseIncludeDirectories(configurationElement);
-                coverletSettings.ExcludeAttributes = this.ParseExcludeAttributes(configurationElement);
-                coverletSettings.ExcludeSourceFiles = this.ParseExcludeSourceFiles(configurationElement);
-                coverletSettings.MergeWith = this.ParseMergeWith(configurationElement);
-                coverletSettings.UseSourceLink = this.ParseUseSourceLink(configurationElement);
-                coverletSettings.SingleHit = this.ParseSingleHit(configurationElement);
-                coverletSettings.IncludeTestAssembly = this.ParseIncludeTestAssembly(configurationElement);
+                coverletSettings.IncludeFilters = ParseIncludeFilters(configurationElement);
+                coverletSettings.IncludeDirectories = ParseIncludeDirectories(configurationElement);
+                coverletSettings.ExcludeAttributes = ParseExcludeAttributes(configurationElement);
+                coverletSettings.ExcludeSourceFiles = ParseExcludeSourceFiles(configurationElement);
+                coverletSettings.MergeWith = ParseMergeWith(configurationElement);
+                coverletSettings.UseSourceLink = ParseUseSourceLink(configurationElement);
+                coverletSettings.SingleHit = ParseSingleHit(configurationElement);
+                coverletSettings.IncludeTestAssembly = ParseIncludeTestAssembly(configurationElement);
+                coverletSettings.SkipAutoProps = ParseSkipAutoProps(configurationElement);
+                coverletSettings.DoesNotReturnAttributes = ParseDoesNotReturnAttributes(configurationElement);
             }
 
-            coverletSettings.ReportFormats = this.ParseReportFormats(configurationElement);
-            coverletSettings.ExcludeFilters = this.ParseExcludeFilters(configurationElement);
+            coverletSettings.ReportFormats = ParseReportFormats(configurationElement);
+            coverletSettings.ExcludeFilters = ParseExcludeFilters(configurationElement);
 
             if (_eqtTrace.IsVerboseEnabled)
             {
@@ -206,13 +208,36 @@ namespace Coverlet.Collector.DataCollection
         }
 
         /// <summary>
+        /// Parse skipautoprops flag
+        /// </summary>
+        /// <param name="configurationElement">Configuration element</param>
+        /// <returns>Include Test Assembly Flag</returns>
+        private bool ParseSkipAutoProps(XmlElement configurationElement)
+        {
+            XmlElement skipAutoPropsElement = configurationElement[CoverletConstants.SkipAutoProps];
+            bool.TryParse(skipAutoPropsElement?.InnerText, out bool skipAutoProps);
+            return skipAutoProps;
+        }
+
+        /// <summary>
+        /// Parse attributes that mark methods that do not return.
+        /// </summary>
+        /// <param name="configurationElement">Configuration element</param>
+        /// <returns>DoesNotReturn attributes</returns>
+        private string[] ParseDoesNotReturnAttributes(XmlElement configurationElement)
+        {
+            XmlElement doesNotReturnAttributesElement = configurationElement[CoverletConstants.DoesNotReturnAttributesElementName];
+            return this.SplitElement(doesNotReturnAttributesElement);
+        }
+
+        /// <summary>
         /// Splits a comma separated elements into an array
         /// </summary>
         /// <param name="element">The element to split</param>
         /// <returns>An array of the values in the element</returns>
         private string[] SplitElement(XmlElement element)
         {
-            return element?.InnerText?.Split(',', StringSplitOptions.RemoveEmptyEntries).Where(value => !string.IsNullOrWhiteSpace(value)).Select(value => value.Trim()).ToArray();
+            return element?.InnerText?.Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries).Where(value => !string.IsNullOrWhiteSpace(value)).Select(value => value.Trim()).ToArray();
         }
     }
 }

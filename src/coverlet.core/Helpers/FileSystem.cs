@@ -1,4 +1,4 @@
-﻿using Coverlet.Core.Abstracts;
+﻿using Coverlet.Core.Abstractions;
 using System.IO;
 
 namespace Coverlet.Core.Helpers
@@ -47,6 +47,17 @@ namespace Coverlet.Core.Helpers
         public virtual Stream NewFileStream(string path, FileMode mode, FileAccess access)
         {
             return new FileStream(path, mode, access);
+        }
+
+        public string[] ReadAllLines(string path)
+        {
+            return File.ReadAllLines(path);
+        }
+
+        // Escape format characters in file names
+        internal static string EscapeFileName(string fileName)
+        {
+            return fileName?.Replace("{", "{{").Replace("}", "}}");
         }
     }
 }

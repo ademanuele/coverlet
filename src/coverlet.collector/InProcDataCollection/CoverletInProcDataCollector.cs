@@ -1,5 +1,7 @@
 ﻿using System;
+using System.Diagnostics;
 using System.Reflection;
+using System.Text;
 
 using coverlet.collector.Resources;
 using Coverlet.Collector.Utilities;
@@ -13,9 +15,30 @@ namespace Coverlet.Collector.DataCollection
     public class CoverletInProcDataCollector : InProcDataCollection
     {
         private TestPlatformEqtTrace _eqtTrace;
+        private bool _enableExceptionLog = false;
+
+        private void AttachDebugger()
+        {
+            if (int.TryParse(Environment.GetEnvironmentVariable("COVERLET_DATACOLLECTOR_INPROC_DEBUG"), out int result) && result == 1)
+            {
+                Debugger.Launch();
+                Debugger.Break();
+            }
+        }
+
+        private void EnableExceptionLog()
+        {
+            if (int.TryParse(Environment.GetEnvironmentVariable("COVERLET_DATACOLLECTOR_INPROC_EXCEPTIONLOG_ENABLED"), out int result) && result == 1)
+            {
+                _enableExceptionLog = true;
+            }
+        }
 
         public void Initialize(IDataCollectionSink dataCollectionSink)
         {
+            AttachDebugger();
+            EnableExceptionLog();
+
             _eqtTrace = new TestPlatformEqtTrace();
             _eqtTrace.Verbose("Initialize CoverletInProcDataCollector");
         }
@@ -42,14 +65,18 @@ namespace Coverlet.Collector.DataCollection
                 {
                     _eqtTrace.Verbose($"Calling ModuleTrackerTemplate.UnloadModule for '{injectedInstrumentationClass.Assembly.FullName}'");
                     var unloadModule = injectedInstrumentationClass.GetMethod(nameof(ModuleTrackerTemplate.UnloadModule), new[] { typeof(object), typeof(EventArgs) });
-                    unloadModule.Invoke(null, new[] { null, EventArgs.Empty });
+                    unloadModule.Invoke(null, new[] { (object)this, EventArgs.Empty });
+                    injectedInstrumentationClass.GetField("FlushHitFile", BindingFlags.Static | BindingFlags.Public).SetValue(null, false);
                     _eqtTrace.Verbose($"Called ModuleTrackerTemplate.UnloadModule for '{injectedInstrumentationClass.Assembly.FullName}'");
                 }
                 catch (Exception ex)
                 {
-                    _eqtTrace.Error("{0}: Failed to unload module with error: {1}", CoverletConstants.InProcDataCollectorName, ex);
-                    string errorMessage = string.Format(Resources.FailedToUnloadModule, CoverletConstants.InProcDataCollectorName);
-                    throw new CoverletDataCollectorException(errorMessage, ex);
+                    if (_enableExceptionLog)
+                    {
+                        _eqtTrace.Error("{0}: Failed to unload module with error: {1}", CoverletConstants.InProcDataCollectorName, ex);
+                        string errorMessage = string.Format(Resources.FailedToUnloadModule, CoverletConstants.InProcDataCollectorName);
+                        throw new CoverletDataCollectorException(errorMessage, ex);
+                    }
                 }
             }
         }
@@ -75,7 +102,25 @@ namespace Coverlet.Collector.DataCollection
             }
             catch (Exception ex)
             {
-                _eqtTrace.Warning("{0}: Failed to get Instrumentation class with error: {1}", CoverletConstants.InProcDataCollectorName, ex);
+                if (_enableExceptionLog)
+                {
+                    StringBuilder exceptionString = new StringBuilder();
+                    exceptionString.AppendFormat("{0}: Failed to get Instrumentation class for assembly '{1}' with error: {2}",
+                        CoverletConstants.InProcDataCollectorName, assembly, ex);
+                    exceptionString.AppendLine();
+
+                    if (ex is ReflectionTypeLoadException rtle)
+                    {
+                        exceptionString.AppendLine("ReflectionTypeLoadException list:");
+                        foreach (Exception loaderEx in rtle.LoaderExceptions)
+                        {
+                            exceptionString.AppendLine(loaderEx.ToString());
+                        }
+                    }
+
+                    _eqtTrace.Warning(exceptionString.ToString());
+                }
+
                 return null;
             }
         }

@@ -1,4 +1,5 @@
-﻿using System.IO;
+﻿using Coverlet.Tests.Xunit.Extensions;
+using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using Xunit;
@@ -14,22 +15,33 @@ namespace Coverlet.Integration.Tests
             return Path.Combine(projectPath, "coverletTool", "coverlet ");
         }
 
-        [Fact]
+        [ConditionalFact]
+        [SkipOnOS(OS.Linux)]
+        [SkipOnOS(OS.MacOS)]
         public void DotnetTool()
         {
-            if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-            {
-                // Disabled for the moment on unix system we get an exception(folder access denied) during tool installation
-                return;
-            }
-
             using ClonedTemplateProject clonedTemplateProject = CloneTemplateProject();
             UpdateNugeConfigtWithLocalPackageFolder(clonedTemplateProject.ProjectRootPath!);
             string coverletToolCommandPath = InstallTool(clonedTemplateProject.ProjectRootPath!);
             DotnetCli($"build {clonedTemplateProject.ProjectRootPath}", out string standardOutput, out string standardError);
-            string publishedTestFile = clonedTemplateProject.GetFiles("*" + ClonedTemplateProject.AssemblyName + ".dll").Single(f => !f.Contains("obj"));
+            string publishedTestFile = clonedTemplateProject.GetFiles("*" + ClonedTemplateProject.AssemblyName + ".dll").Single(f => !f.Contains("obj") && !f.Contains("ref"));
             RunCommand(coverletToolCommandPath, $"\"{publishedTestFile}\" --target \"dotnet\" --targetargs \"test {Path.Combine(clonedTemplateProject.ProjectRootPath, ClonedTemplateProject.ProjectFileName)} --no-build\"  --include-test-assembly --output \"{clonedTemplateProject.ProjectRootPath}\"\\", out standardOutput, out standardError);
-            Assert.Contains("Test Run Successful.", standardOutput);
+            Assert.Contains("Passed!", standardOutput);
+            AssertCoverage(clonedTemplateProject, standardOutput: standardOutput);
+        }
+
+        [ConditionalFact]
+        [SkipOnOS(OS.Linux)]
+        [SkipOnOS(OS.MacOS)]
+        public void StandAlone()
+        {
+            using ClonedTemplateProject clonedTemplateProject = CloneTemplateProject();
+            UpdateNugeConfigtWithLocalPackageFolder(clonedTemplateProject.ProjectRootPath!);
+            string coverletToolCommandPath = InstallTool(clonedTemplateProject.ProjectRootPath!);
+            DotnetCli($"build {clonedTemplateProject.ProjectRootPath}", out string standardOutput, out string standardError);
+            string publishedTestFile = clonedTemplateProject.GetFiles("*" + ClonedTemplateProject.AssemblyName + ".dll").Single(f => !f.Contains("obj") && !f.Contains("ref"));
+            RunCommand(coverletToolCommandPath, $"\"{Path.GetDirectoryName(publishedTestFile)}\" --target \"dotnet\" --targetargs \"{publishedTestFile}\"  --output \"{clonedTemplateProject.ProjectRootPath}\"\\", out standardOutput, out standardError);
+            Assert.Contains("Hello World!", standardOutput);
             AssertCoverage(clonedTemplateProject, standardOutput: standardOutput);
         }
     }

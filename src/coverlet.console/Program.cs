@@ -8,11 +8,13 @@ using System.Text;
 using ConsoleTables;
 using Coverlet.Console.Logging;
 using Coverlet.Core;
-using Coverlet.Core.Abstracts;
+using Coverlet.Core.Abstractions;
 using Coverlet.Core.Enums;
-using Coverlet.Core.Extensions;
+using Coverlet.Core.Helpers;
 using Coverlet.Core.Reporters;
+using Coverlet.Core.Symbols;
 using McMaster.Extensions.CommandLineUtils;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Coverlet.Console
 {
@@ -20,7 +22,21 @@ namespace Coverlet.Console
     {
         static int Main(string[] args)
         {
-            var logger = new ConsoleLogger();
+            IServiceCollection serviceCollection = new ServiceCollection();
+            serviceCollection.AddTransient<IRetryHelper, RetryHelper>();
+            serviceCollection.AddTransient<IProcessExitHandler, ProcessExitHandler>();
+            serviceCollection.AddTransient<IFileSystem, FileSystem>();
+            serviceCollection.AddTransient<ILogger, ConsoleLogger>();
+            // We need to keep singleton/static semantics
+            serviceCollection.AddSingleton<IInstrumentationHelper, InstrumentationHelper>();
+            serviceCollection.AddSingleton<ISourceRootTranslator, SourceRootTranslator>(provider => new SourceRootTranslator(provider.GetRequiredService<ILogger>(), provider.GetRequiredService<IFileSystem>()));
+            serviceCollection.AddSingleton<ICecilSymbolHelper, CecilSymbolHelper>();
+
+            ServiceProvider serviceProvider = serviceCollection.BuildServiceProvider();
+
+            var logger = (ConsoleLogger)serviceProvider.GetService<ILogger>();
+            var fileSystem = serviceProvider.GetService<IFileSystem>();
+
             var app = new CommandLineApplication();
             app.Name = "coverlet";
             app.FullName = "Cross platform .NET Core code coverage tool";
@@ -28,7 +44,7 @@ namespace Coverlet.Console
             app.VersionOption("-v|--version", GetAssemblyVersion());
             int exitCode = (int)CommandExitCodes.Success;
 
-            CommandArgument module = app.Argument("<ASSEMBLY>", "Path to the test assembly.");
+            CommandArgument moduleOrAppDirectory = app.Argument("<ASSEMBLY|DIRECTORY>", "Path to the test assembly or application directory.");
             CommandOption target = app.Option("-t|--target", "Path to the test runner application.", CommandOptionType.SingleValue);
             CommandOption targs = app.Option("-a|--targetargs", "Arguments to be passed to the test runner.", CommandOptionType.SingleValue);
             CommandOption output = app.Option("-o|--output", "Output of the generated coverage report", CommandOptionType.SingleValue);
@@ -44,13 +60,15 @@ namespace Coverlet.Console
             CommandOption excludeAttributes = app.Option("--exclude-by-attribute", "Attributes to exclude from code coverage.", CommandOptionType.MultipleValue);
             CommandOption includeTestAssembly = app.Option("--include-test-assembly", "Specifies whether to report code coverage of the test assembly.", CommandOptionType.NoValue);
             CommandOption singleHit = app.Option("--single-hit", "Specifies whether to limit code coverage hit reporting to a single hit for each location", CommandOptionType.NoValue);
+            CommandOption skipAutoProp = app.Option("--skipautoprops", "Neither track nor record auto-implemented properties.", CommandOptionType.NoValue);
             CommandOption mergeWith = app.Option("--merge-with", "Path to existing coverage result to merge.", CommandOptionType.SingleValue);
             CommandOption useSourceLink = app.Option("--use-source-link", "Specifies whether to use SourceLink URIs in place of file system paths.", CommandOptionType.NoValue);
+            CommandOption doesNotReturnAttributes = app.Option("--does-not-return-attribute", "Attributes that mark methods that do not return.", CommandOptionType.MultipleValue);
 
             app.OnExecute(() =>
             {
-                if (string.IsNullOrEmpty(module.Value) || string.IsNullOrWhiteSpace(module.Value))
-                    throw new CommandParsingException(app, "No test assembly specified.");
+                if (string.IsNullOrEmpty(moduleOrAppDirectory.Value) || string.IsNullOrWhiteSpace(moduleOrAppDirectory.Value))
+                    throw new CommandParsingException(app, "No test assembly or application directory specified.");
 
                 if (!target.HasValue())
                     throw new CommandParsingException(app, "Target must be specified.");
@@ -60,20 +78,29 @@ namespace Coverlet.Console
                     // Adjust log level based on user input.
                     logger.Level = verbosity.ParsedValue;
                 }
-                var fileSystem = DependencyInjection.Current.GetService<IFileSystem>();
-                Coverage coverage = new Coverage(module.Value,
-                    includeFilters.Values.ToArray(),
-                    includeDirectories.Values.ToArray(),
-                    excludeFilters.Values.ToArray(),
-                    excludedSourceFiles.Values.ToArray(),
-                    excludeAttributes.Values.ToArray(),
-                    includeTestAssembly.HasValue(),
-                    singleHit.HasValue(),
-                    mergeWith.Value(),
-                    useSourceLink.HasValue(),
-                    logger,
-                    DependencyInjection.Current.GetService<IInstrumentationHelper>(),
-                    fileSystem);
+
+                CoverageParameters parameters = new CoverageParameters
+                {
+                    IncludeFilters = includeFilters.Values.ToArray(),
+                    IncludeDirectories = includeDirectories.Values.ToArray(),
+                    ExcludeFilters = excludeFilters.Values.ToArray(),
+                    ExcludedSourceFiles = excludedSourceFiles.Values.ToArray(),
+                    ExcludeAttributes = excludeAttributes.Values.ToArray(),
+                    IncludeTestAssembly = includeTestAssembly.HasValue(),
+                    SingleHit = singleHit.HasValue(),
+                    MergeWith = mergeWith.Value(),
+                    UseSourceLink = useSourceLink.HasValue(),
+                    SkipAutoProps = skipAutoProp.HasValue(),
+                    DoesNotReturnAttributes = doesNotReturnAttributes.Values.ToArray()
+                };
+
+                Coverage coverage = new Coverage(moduleOrAppDirectory.Value,
+                                                 parameters,
+                                                 logger,
+                                                 serviceProvider.GetRequiredService<IInstrumentationHelper>(),
+                                                 fileSystem,
+                                                 serviceProvider.GetRequiredService<ISourceRootTranslator>(),
+                                                 serviceProvider.GetRequiredService<ICecilSymbolHelper>());
                 coverage.PrepareModules();
 
                 Process process = new Process();

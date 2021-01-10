@@ -2,7 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using Coverlet.Core.Abstracts;
+using Coverlet.Core.Abstractions;
+using Coverlet.Core.Helpers;
 using Coverlet.Core.Instrumentation;
 
 using Newtonsoft.Json;
@@ -10,9 +11,25 @@ using Newtonsoft.Json.Linq;
 
 namespace Coverlet.Core
 {
+    public class CoverageParameters
+    {
+        public string Module { get; set; }
+        public string[] IncludeFilters { get; set; }
+        public string[] IncludeDirectories { get; set; }
+        public string[] ExcludeFilters { get; set; }
+        public string[] ExcludedSourceFiles { get; set; }
+        public string[] ExcludeAttributes { get; set; }
+        public bool IncludeTestAssembly { get; set; }
+        public bool SingleHit { get; set; }
+        public string MergeWith { get; set; }
+        public bool UseSourceLink { get; set; }
+        public string[] DoesNotReturnAttributes { get; set; }
+        public bool SkipAutoProps { get; set; }
+    }
+
     public class Coverage
     {
-        private string _module;
+        private string _moduleOrAppDirectory;
         private string _identifier;
         private string[] _includeFilters;
         private string[] _includeDirectories;
@@ -23,9 +40,13 @@ namespace Coverlet.Core
         private bool _singleHit;
         private string _mergeWith;
         private bool _useSourceLink;
+        private string[] _doesNotReturnAttributes;
+        private bool _skipAutoProps;
         private ILogger _logger;
         private IInstrumentationHelper _instrumentationHelper;
         private IFileSystem _fileSystem;
+        private ISourceRootTranslator _sourceRootTranslator;
+        private ICecilSymbolHelper _cecilSymbolHelper;
         private List<InstrumenterResult> _results;
 
         public string Identifier
@@ -33,57 +54,60 @@ namespace Coverlet.Core
             get { return _identifier; }
         }
 
-        public Coverage(string module,
-            string[] includeFilters,
-            string[] includeDirectories,
-            string[] excludeFilters,
-            string[] excludedSourceFiles,
-            string[] excludeAttributes,
-            bool includeTestAssembly,
-            bool singleHit,
-            string mergeWith,
-            bool useSourceLink,
+        public Coverage(string moduleOrDirectory,
+            CoverageParameters parameters,
             ILogger logger,
             IInstrumentationHelper instrumentationHelper,
-            IFileSystem fileSystem)
+            IFileSystem fileSystem,
+            ISourceRootTranslator sourceRootTranslator,
+            ICecilSymbolHelper cecilSymbolHelper)
         {
-            _module = module;
-            _includeFilters = includeFilters;
-            _includeDirectories = includeDirectories ?? Array.Empty<string>();
-            _excludeFilters = excludeFilters;
-            _excludedSourceFiles = excludedSourceFiles;
-            _excludeAttributes = excludeAttributes;
-            _includeTestAssembly = includeTestAssembly;
-            _singleHit = singleHit;
-            _mergeWith = mergeWith;
-            _useSourceLink = useSourceLink;
+            _moduleOrAppDirectory = moduleOrDirectory;
+            _includeFilters = parameters.IncludeFilters;
+            _includeDirectories = parameters.IncludeDirectories ?? Array.Empty<string>();
+            _excludeFilters = parameters.ExcludeFilters;
+            _excludedSourceFiles = parameters.ExcludedSourceFiles;
+            _excludeAttributes = parameters.ExcludeAttributes;
+            _includeTestAssembly = parameters.IncludeTestAssembly;
+            _singleHit = parameters.SingleHit;
+            _mergeWith = parameters.MergeWith;
+            _useSourceLink = parameters.UseSourceLink;
+            _doesNotReturnAttributes = parameters.DoesNotReturnAttributes;
             _logger = logger;
             _instrumentationHelper = instrumentationHelper;
             _fileSystem = fileSystem;
+            _sourceRootTranslator = sourceRootTranslator;
+            _cecilSymbolHelper = cecilSymbolHelper;
+            _skipAutoProps = parameters.SkipAutoProps;
 
             _identifier = Guid.NewGuid().ToString();
             _results = new List<InstrumenterResult>();
         }
 
-        public Coverage(CoveragePrepareResult prepareResult, ILogger logger, IInstrumentationHelper instrumentationHelper, IFileSystem fileSystem)
+        public Coverage(CoveragePrepareResult prepareResult,
+                        ILogger logger,
+                        IInstrumentationHelper instrumentationHelper,
+                        IFileSystem fileSystem,
+                        ISourceRootTranslator sourceRootTranslator)
         {
             _identifier = prepareResult.Identifier;
-            _module = prepareResult.Module;
+            _moduleOrAppDirectory = prepareResult.ModuleOrDirectory;
             _mergeWith = prepareResult.MergeWith;
             _useSourceLink = prepareResult.UseSourceLink;
             _results = new List<InstrumenterResult>(prepareResult.Results);
             _logger = logger;
             _instrumentationHelper = instrumentationHelper;
             _fileSystem = fileSystem;
+            _sourceRootTranslator = sourceRootTranslator;
         }
 
         public CoveragePrepareResult PrepareModules()
         {
-            string[] modules = _instrumentationHelper.GetCoverableModules(_module, _includeDirectories, _includeTestAssembly);
+            string[] modules = _instrumentationHelper.GetCoverableModules(_moduleOrAppDirectory, _includeDirectories, _includeTestAssembly);
 
             Array.ForEach(_excludeFilters ?? Array.Empty<string>(), filter => _logger.LogVerbose($"Excluded module filter '{filter}'"));
             Array.ForEach(_includeFilters ?? Array.Empty<string>(), filter => _logger.LogVerbose($"Included module filter '{filter}'"));
-            Array.ForEach(_excludedSourceFiles ?? Array.Empty<string>(), filter => _logger.LogVerbose($"Excluded source files filter '{filter}'"));
+            Array.ForEach(_excludedSourceFiles ?? Array.Empty<string>(), filter => _logger.LogVerbose($"Excluded source files filter '{FileSystem.EscapeFileName(filter)}'"));
 
             _excludeFilters = _excludeFilters?.Where(f => _instrumentationHelper.IsValidFilterExpression(f)).ToArray();
             _includeFilters = _includeFilters?.Where(f => _instrumentationHelper.IsValidFilterExpression(f)).ToArray();
@@ -97,7 +121,21 @@ namespace Coverlet.Core
                     continue;
                 }
 
-                var instrumenter = new Instrumenter(module, _identifier, _excludeFilters, _includeFilters, _excludedSourceFiles, _excludeAttributes, _singleHit, _logger, _instrumentationHelper, _fileSystem);
+                var instrumenter = new Instrumenter(module,
+                                                    _identifier,
+                                                    _excludeFilters,
+                                                    _includeFilters,
+                                                    _excludedSourceFiles,
+                                                    _excludeAttributes,
+                                                    _doesNotReturnAttributes,
+                                                    _singleHit,
+                                                    _skipAutoProps,
+                                                    _logger,
+                                                    _instrumentationHelper,
+                                                    _fileSystem,
+                                                    _sourceRootTranslator,
+                                                    _cecilSymbolHelper);
+
                 if (instrumenter.CanInstrument())
                 {
                     _instrumentationHelper.BackupOriginalModule(module, _identifier);
@@ -123,7 +161,7 @@ namespace Coverlet.Core
             return new CoveragePrepareResult()
             {
                 Identifier = _identifier,
-                Module = _module,
+                ModuleOrDirectory = _moduleOrAppDirectory,
                 MergeWith = _mergeWith,
                 UseSourceLink = _useSourceLink,
                 Results = _results.ToArray()
@@ -230,6 +268,13 @@ namespace Coverlet.Core
                 {
                     foreach (var @class in document.Value)
                     {
+                        // We fix only lamda generated class
+                        // https://github.com/dotnet/roslyn/blob/master/src/Compilers/CSharp/Portable/Symbols/Synthesized/GeneratedNameKind.cs#L18
+                        if (!@class.Key.Contains("<>c"))
+                        {
+                            continue;
+                        }
+
                         foreach (var method in @class.Value)
                         {
                             foreach (var branch in method.Value.Branches)
@@ -347,7 +392,33 @@ namespace Coverlet.Core
                     }
                 }
 
-                List<(int docIndex, int line)> zeroHitsLines = new List<(int docIndex, int line)>();
+                // Calculate lines to skip for every hits start/end candidate
+                // Nested ranges win on outermost one
+                foreach (HitCandidate hitCandidate in result.HitCandidates)
+                {
+                    if (hitCandidate.isBranch || hitCandidate.end == hitCandidate.start)
+                    {
+                        continue;
+                    }
+
+                    foreach (HitCandidate hitCandidateToCompare in result.HitCandidates)
+                    {
+                        if (hitCandidate != hitCandidateToCompare && !hitCandidateToCompare.isBranch)
+                        {
+                            if (hitCandidateToCompare.start >= hitCandidate.start &&
+                               hitCandidateToCompare.end <= hitCandidate.end)
+                            {
+                                for (int i = hitCandidateToCompare.start;
+                                     i <= (hitCandidateToCompare.end == 0 ? hitCandidateToCompare.start : hitCandidateToCompare.end);
+                                     i++)
+                                {
+                                    (hitCandidate.AccountedByNestedInstrumentation ??= new HashSet<int>()).Add(i);
+                                }
+                            }
+                        }
+                    }
+                }
+
                 var documentsList = result.Documents.Values.ToList();
                 using (var fs = _fileSystem.NewFileStream(result.HitsFilePath, FileMode.Open))
                 using (var br = new BinaryReader(fs))
@@ -371,27 +442,14 @@ namespace Coverlet.Core
                         {
                             for (int j = hitLocation.start; j <= hitLocation.end; j++)
                             {
+                                if (hitLocation.AccountedByNestedInstrumentation?.Contains(j) == true)
+                                {
+                                    continue;
+                                }
+
                                 var line = document.Lines[j];
                                 line.Hits += hits;
-
-                                // We register 0 hit lines for later cleanup false positive of nested lambda closures
-                                if (hits == 0)
-                                {
-                                    zeroHitsLines.Add((hitLocation.docIndex, line.Number));
-                                }
                             }
-                        }
-                    }
-                }
-
-                // Cleanup nested state machine false positive hits
-                foreach (var (docIndex, line) in zeroHitsLines)
-                {
-                    foreach (var lineToCheck in documentsList[docIndex].Lines)
-                    {
-                        if (lineToCheck.Key == line)
-                        {
-                            lineToCheck.Value.Hits = 0;
                         }
                     }
                 }
@@ -416,29 +474,33 @@ namespace Coverlet.Core
                 string key = sourceLinkDocument.Key;
                 if (Path.GetFileName(key) != "*") continue;
 
-                string directoryDocument = Path.GetDirectoryName(document);
-                string sourceLinkRoot = Path.GetDirectoryName(key);
-                string relativePath = "";
-
-                // if document is on repo root we skip relative path calculation
-                if (directoryDocument != sourceLinkRoot)
+                IReadOnlyList<SourceRootMapping> rootMapping = _sourceRootTranslator.ResolvePathRoot(key.Substring(0, key.Length - 1));
+                foreach (string keyMapping in rootMapping is null ? new List<string>() { key } : new List<string>(rootMapping.Select(m => m.OriginalPath)))
                 {
-                    if (!directoryDocument.StartsWith(sourceLinkRoot + Path.DirectorySeparatorChar))
-                        continue;
+                    string directoryDocument = Path.GetDirectoryName(document);
+                    string sourceLinkRoot = Path.GetDirectoryName(keyMapping);
+                    string relativePath = "";
 
-                    relativePath = directoryDocument.Substring(sourceLinkRoot.Length + 1);
-                }
+                    // if document is on repo root we skip relative path calculation
+                    if (directoryDocument != sourceLinkRoot)
+                    {
+                        if (!directoryDocument.StartsWith(sourceLinkRoot + Path.DirectorySeparatorChar))
+                            continue;
 
-                if (relativePathOfBestMatch.Length == 0)
-                {
-                    keyWithBestMatch = sourceLinkDocument.Key;
-                    relativePathOfBestMatch = relativePath;
-                }
+                        relativePath = directoryDocument.Substring(sourceLinkRoot.Length + 1);
+                    }
 
-                if (relativePath.Length < relativePathOfBestMatch.Length)
-                {
-                    keyWithBestMatch = sourceLinkDocument.Key;
-                    relativePathOfBestMatch = relativePath;
+                    if (relativePathOfBestMatch.Length == 0)
+                    {
+                        keyWithBestMatch = sourceLinkDocument.Key;
+                        relativePathOfBestMatch = relativePath;
+                    }
+
+                    if (relativePath.Length < relativePathOfBestMatch.Length)
+                    {
+                        keyWithBestMatch = sourceLinkDocument.Key;
+                        relativePathOfBestMatch = relativePath;
+                    }
                 }
             }
 

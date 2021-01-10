@@ -6,8 +6,10 @@ using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
 
-using Coverlet.Core.Abstracts;
+using Coverlet.Core.Instrumentation.Reachability;
+using Coverlet.Core.Abstractions;
 using Coverlet.Core.Attributes;
+using Coverlet.Core.Helpers;
 using Coverlet.Core.Symbols;
 using Microsoft.Extensions.FileSystemGlobbing;
 using Mono.Cecil;
@@ -25,14 +27,18 @@ namespace Coverlet.Core.Instrumentation
         private readonly ExcludedFilesHelper _excludedFilesHelper;
         private readonly string[] _excludedAttributes;
         private readonly bool _singleHit;
+        private readonly bool _skipAutoProps;
         private readonly bool _isCoreLibrary;
         private readonly ILogger _logger;
         private readonly IInstrumentationHelper _instrumentationHelper;
         private readonly IFileSystem _fileSystem;
+        private readonly ISourceRootTranslator _sourceRootTranslator;
+        private readonly ICecilSymbolHelper _cecilSymbolHelper;
         private InstrumenterResult _result;
         private FieldDefinition _customTrackerHitsArray;
         private FieldDefinition _customTrackerHitsFilePath;
         private FieldDefinition _customTrackerSingleHit;
+        private FieldDefinition _customTrackerFlushHitFile;
         private ILProcessor _customTrackerClassConstructorIl;
         private TypeDefinition _customTrackerTypeDef;
         private MethodReference _customTrackerRegisterUnloadEventsMethod;
@@ -41,6 +47,8 @@ namespace Coverlet.Core.Instrumentation
         private List<string> _branchesInCompiledGeneratedClass;
         private List<(MethodDefinition, int)> _excludedMethods;
         private List<string> _excludedCompilerGeneratedTypes;
+        private readonly string[] _doesNotReturnAttributes;
+        private ReachabilityHelper _reachabilityHelper;
 
         public bool SkipModule { get; set; } = false;
 
@@ -51,22 +59,42 @@ namespace Coverlet.Core.Instrumentation
             string[] includeFilters,
             string[] excludedFiles,
             string[] excludedAttributes,
+            string[] doesNotReturnAttributes,
             bool singleHit,
+            bool skipAutoProps,
             ILogger logger,
             IInstrumentationHelper instrumentationHelper,
-            IFileSystem fileSystem)
+            IFileSystem fileSystem,
+            ISourceRootTranslator sourceRootTranslator,
+            ICecilSymbolHelper cecilSymbolHelper)
         {
             _module = module;
             _identifier = identifier;
             _excludeFilters = excludeFilters;
             _includeFilters = includeFilters;
             _excludedFilesHelper = new ExcludedFilesHelper(excludedFiles, logger);
-            _excludedAttributes = excludedAttributes;
+            _excludedAttributes = PrepareAttributes(excludedAttributes, nameof(ExcludeFromCoverageAttribute), nameof(ExcludeFromCodeCoverageAttribute));
             _singleHit = singleHit;
             _isCoreLibrary = Path.GetFileNameWithoutExtension(_module) == "System.Private.CoreLib";
             _logger = logger;
             _instrumentationHelper = instrumentationHelper;
             _fileSystem = fileSystem;
+            _sourceRootTranslator = sourceRootTranslator;
+            _cecilSymbolHelper = cecilSymbolHelper;
+            _doesNotReturnAttributes = PrepareAttributes(doesNotReturnAttributes, nameof(DoesNotReturnAttribute));
+            _skipAutoProps = skipAutoProps;
+        }
+
+        private static string[] PrepareAttributes(IEnumerable<string> providedAttrs, params string[] defaultAttrs)
+        {
+            return
+                (providedAttrs ?? Array.Empty<string>())
+                // In case the attribute class ends in "Attribute", but it wasn't specified.
+                // Both names are included (if it wasn't specified) because the attribute class might not actually end in the prefix.
+                .SelectMany(a => a.EndsWith("Attribute") ? new[] { a } : new[] { a, $"{a}Attribute" })
+                // The default custom attributes used to exclude from coverage.
+                .Union(defaultAttrs)
+                .ToArray();
         }
 
         public bool CanInstrument()
@@ -83,7 +111,7 @@ namespace Coverlet.Core.Instrumentation
                         }
                         else
                         {
-                            _logger.LogVerbose($"Unable to instrument module: {_module}, embedded pdb without local source files, [{firstNotFoundDocument}]");
+                            _logger.LogVerbose($"Unable to instrument module: {_module}, embedded pdb without local source files, [{FileSystem.EscapeFileName(firstNotFoundDocument)}]");
                             return false;
                         }
                     }
@@ -95,7 +123,7 @@ namespace Coverlet.Core.Instrumentation
                         }
                         else
                         {
-                            _logger.LogVerbose($"Unable to instrument module: {_module}, pdb without local source files, [{firstNotFoundDocument}]");
+                            _logger.LogVerbose($"Unable to instrument module: {_module}, pdb without local source files, [{FileSystem.EscapeFileName(firstNotFoundDocument)}]");
                             return false;
                         }
                     }
@@ -132,7 +160,7 @@ namespace Coverlet.Core.Instrumentation
             {
                 foreach (string sourceFile in _excludedSourceFiles)
                 {
-                    _logger.LogVerbose($"Excluded source file: '{sourceFile}'");
+                    _logger.LogVerbose($"Excluded source file: '{FileSystem.EscapeFileName(sourceFile)}'");
                 }
             }
 
@@ -163,8 +191,31 @@ namespace Coverlet.Core.Instrumentation
             return _isCoreLibrary && type.FullName == "System.Threading.Interlocked";
         }
 
+        // Have to do this before we start writing to a module, as we'll get into file
+        // locking issues if we do it while writing.
+        private void CreateReachabilityHelper()
+        {
+            using (var stream = _fileSystem.NewFileStream(_module, FileMode.Open, FileAccess.Read))
+            using (var resolver = new NetstandardAwareAssemblyResolver(_module, _logger))
+            {
+                resolver.AddSearchDirectory(Path.GetDirectoryName(_module));
+                var parameters = new ReaderParameters { ReadSymbols = true, AssemblyResolver = resolver };
+                if (_isCoreLibrary)
+                {
+                    parameters.MetadataImporterProvider = new CoreLibMetadataImporterProvider();
+                }
+
+                using (var module = ModuleDefinition.ReadModule(stream, parameters))
+                {
+                    _reachabilityHelper = ReachabilityHelper.CreateForModule(module, _doesNotReturnAttributes, _logger);
+                }
+            }
+        }
+
         private void InstrumentModule()
         {
+            CreateReachabilityHelper();
+
             using (var stream = _fileSystem.NewFileStream(_module, FileMode.Open, FileAccess.ReadWrite))
             using (var resolver = new NetstandardAwareAssemblyResolver(_module, _logger))
             {
@@ -179,9 +230,9 @@ namespace Coverlet.Core.Instrumentation
                 {
                     foreach (CustomAttribute customAttribute in module.Assembly.CustomAttributes)
                     {
-                        if (customAttribute.AttributeType.FullName == "System.Diagnostics.CodeAnalysis.ExcludeFromCodeCoverageAttribute")
+                        if (IsExcludeAttribute(customAttribute))
                         {
-                            _logger.LogVerbose($"Excluded module: '{module}' for assembly level attribute 'System.Diagnostics.CodeAnalysis.ExcludeFromCodeCoverageAttribute'");
+                            _logger.LogVerbose($"Excluded module: '{module}' for assembly level attribute {customAttribute.AttributeType.FullName}");
                             SkipModule = true;
                             return;
                         }
@@ -240,6 +291,8 @@ namespace Coverlet.Core.Instrumentation
                     _customTrackerClassConstructorIl.InsertBefore(lastInstr, Instruction.Create(OpCodes.Stsfld, _customTrackerHitsFilePath));
                     _customTrackerClassConstructorIl.InsertBefore(lastInstr, Instruction.Create(_singleHit ? OpCodes.Ldc_I4_1 : OpCodes.Ldc_I4_0));
                     _customTrackerClassConstructorIl.InsertBefore(lastInstr, Instruction.Create(OpCodes.Stsfld, _customTrackerSingleHit));
+                    _customTrackerClassConstructorIl.InsertBefore(lastInstr, Instruction.Create(OpCodes.Ldc_I4_1));
+                    _customTrackerClassConstructorIl.InsertBefore(lastInstr, Instruction.Create(OpCodes.Stsfld, _customTrackerFlushHitFile));
 
                     if (containsAppContext)
                     {
@@ -291,6 +344,8 @@ namespace Coverlet.Core.Instrumentation
                         _customTrackerHitsFilePath = fieldClone;
                     else if (fieldClone.Name == nameof(ModuleTrackerTemplate.SingleHit))
                         _customTrackerSingleHit = fieldClone;
+                    else if (fieldClone.Name == nameof(ModuleTrackerTemplate.FlushHitFile))
+                        _customTrackerFlushHitFile = fieldClone;
                 }
 
                 foreach (MethodDefinition methodDef in moduleTrackerTemplate.Methods)
@@ -364,6 +419,37 @@ namespace Coverlet.Core.Instrumentation
             Debug.Assert(_customTrackerClassConstructorIl != null);
         }
 
+        private bool IsMethodOfCompilerGeneratedClassOfAsyncStateMachineToBeExcluded(MethodDefinition method)
+        {
+            // Type compiler generated, the async state machine
+            TypeDefinition typeDefinition = method.DeclaringType;
+            if (typeDefinition.DeclaringType is null)
+            {
+                return false;
+            }
+
+            // Search in type that contains async state machine, compiler generates async state machine in private nested class
+            foreach (MethodDefinition typeMethod in typeDefinition.DeclaringType.Methods)
+            {
+                // If we find the async state machine attribute on method
+                CustomAttribute attribute;
+                if ((attribute = typeMethod.CustomAttributes.SingleOrDefault(a => a.AttributeType.FullName == typeof(AsyncStateMachineAttribute).FullName)) != null)
+                {
+                    // If the async state machine generated by compiler is "associated" to this method we check for exclusions
+                    // The associated type is specified on attribute constructor 
+                    // https://docs.microsoft.com/en-us/dotnet/api/system.runtime.compilerservices.asyncstatemachineattribute.-ctor?view=netcore-3.1
+                    if (attribute.ConstructorArguments[0].Value == method.DeclaringType)
+                    {
+                        if (typeMethod.CustomAttributes.Any(IsExcludeAttribute))
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+            return false;
+        }
+
         private void InstrumentType(TypeDefinition type)
         {
             var methods = type.GetMethods();
@@ -380,12 +466,23 @@ namespace Coverlet.Core.Instrumentation
 
                 if (actualMethod.IsGetter || actualMethod.IsSetter)
                 {
+                    if (_skipAutoProps && actualMethod.CustomAttributes.Any(ca => ca.AttributeType.FullName == typeof(CompilerGeneratedAttribute).FullName))
+                    {
+                        continue;
+                    }
+
                     PropertyDefinition prop = type.Properties.FirstOrDefault(p => (p.GetMethod ?? p.SetMethod).FullName.Equals(actualMethod.FullName));
                     if (prop?.HasCustomAttributes == true)
                         customAttributes = customAttributes.Union(prop.CustomAttributes);
                 }
 
                 ordinal++;
+
+                if (IsMethodOfCompilerGeneratedClassOfAsyncStateMachineToBeExcluded(method))
+                {
+                    continue;
+                }
+
                 if (IsSynthesizedMemberToBeExcluded(method))
                 {
                     continue;
@@ -405,13 +502,15 @@ namespace Coverlet.Core.Instrumentation
             foreach (var ctor in ctors)
             {
                 if (!ctor.CustomAttributes.Any(IsExcludeAttribute))
+                {
                     InstrumentMethod(ctor);
+                }
             }
         }
 
         private void InstrumentMethod(MethodDefinition method)
         {
-            var sourceFile = method.DebugInformation.SequencePoints.Select(s => s.Document.Url).FirstOrDefault();
+            var sourceFile = method.DebugInformation.SequencePoints.Select(s => _sourceRootTranslator.ResolveFilePath(s.Document.Url)).FirstOrDefault();
             if (!string.IsNullOrEmpty(sourceFile) && _excludedFilesHelper.Exclude(sourceFile))
             {
                 if (!(_excludedSourceFiles ??= new List<string>()).Contains(sourceFile))
@@ -439,13 +538,38 @@ namespace Coverlet.Core.Instrumentation
             var index = 0;
             var count = processor.Body.Instructions.Count;
 
-            var branchPoints = CecilSymbolHelper.GetBranchPoints(method);
+            var branchPoints = _cecilSymbolHelper.GetBranchPoints(method);
+
+            var unreachableRanges = _reachabilityHelper.FindUnreachableIL(processor.Body.Instructions, processor.Body.ExceptionHandlers);
+            var currentUnreachableRangeIx = 0;
 
             for (int n = 0; n < count; n++)
             {
                 var instruction = processor.Body.Instructions[index];
                 var sequencePoint = method.DebugInformation.GetSequencePoint(instruction);
                 var targetedBranchPoints = branchPoints.Where(p => p.EndOffset == instruction.Offset);
+
+                // make sure we're looking at the correct unreachable range (if any)
+                var instrOffset = instruction.Offset;
+                while (currentUnreachableRangeIx < unreachableRanges.Length && instrOffset > unreachableRanges[currentUnreachableRangeIx].EndOffset)
+                {
+                    currentUnreachableRangeIx++;
+                }
+
+                // determine if the unreachable
+                var isUnreachable = false;
+                if (currentUnreachableRangeIx < unreachableRanges.Length)
+                {
+                    var range = unreachableRanges[currentUnreachableRangeIx];
+                    isUnreachable = instrOffset >= range.StartOffset && instrOffset <= range.EndOffset;
+                }
+
+                // Check is both reachable, _and_ coverable
+                if (isUnreachable || _cecilSymbolHelper.SkipNotCoverableInstruction(method, instruction))
+                {
+                    index++;
+                    continue;
+                }
 
                 if (sequencePoint != null && !sequencePoint.IsHidden)
                 {
@@ -488,9 +612,9 @@ namespace Coverlet.Core.Instrumentation
 
         private Instruction AddInstrumentationCode(MethodDefinition method, ILProcessor processor, Instruction instruction, SequencePoint sequencePoint)
         {
-            if (!_result.Documents.TryGetValue(sequencePoint.Document.Url, out var document))
+            if (!_result.Documents.TryGetValue(_sourceRootTranslator.ResolveFilePath(sequencePoint.Document.Url), out var document))
             {
-                document = new Document { Path = sequencePoint.Document.Url };
+                document = new Document { Path = _sourceRootTranslator.ResolveFilePath(sequencePoint.Document.Url) };
                 document.Index = _result.Documents.Count;
                 _result.Documents.Add(document.Path, document);
             }
@@ -508,9 +632,9 @@ namespace Coverlet.Core.Instrumentation
 
         private Instruction AddInstrumentationCode(MethodDefinition method, ILProcessor processor, Instruction instruction, BranchPoint branchPoint)
         {
-            if (!_result.Documents.TryGetValue(branchPoint.Document, out var document))
+            if (!_result.Documents.TryGetValue(_sourceRootTranslator.ResolveFilePath(branchPoint.Document), out var document))
             {
-                document = new Document { Path = branchPoint.Document };
+                document = new Document { Path = _sourceRootTranslator.ResolveFilePath(branchPoint.Document) };
                 document.Index = _result.Documents.Count;
                 _result.Documents.Add(document.Path, document);
             }
@@ -623,21 +747,7 @@ namespace Coverlet.Core.Instrumentation
 
         private bool IsExcludeAttribute(CustomAttribute customAttribute)
         {
-            // The default custom attributes used to exclude from coverage.
-            IEnumerable<string> excludeAttributeNames = new List<string>()
-            {
-                nameof(ExcludeFromCoverageAttribute),
-                nameof(ExcludeFromCodeCoverageAttribute)
-            };
-
-            // Include the other attributes to exclude based on incoming parameters.
-            if (_excludedAttributes != null)
-            {
-                excludeAttributeNames = _excludedAttributes.Union(excludeAttributeNames);
-            }
-
-            return excludeAttributeNames.Any(a =>
-                customAttribute.AttributeType.Name.Equals(a.EndsWith("Attribute") ? a : $"{a}Attribute"));
+            return Array.IndexOf(_excludedAttributes, customAttribute.AttributeType.Name) != -1;
         }
 
         private static MethodBody GetMethodBody(MethodDefinition method)
